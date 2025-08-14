@@ -1,0 +1,39 @@
+{
+  "name": "scheduler",
+  "version": "1.0.0",
+  "description": "p2p scheduling service",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:all": "concurrently \"npm run worker:dev\" \"npm run dev\"",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "pages:deploy": "npm run build && wrangler pages deploy dist",
+    "setup": "npm install",
+    "start": "npm run dev:all",
+    "start:lan": "npm run dev:all",
+    "test:connection": "curl -X POST http://127.0.0.1:8787/rooms",
+    "network:info": "ipconfig | findstr \"IPv4\" | findstr /V \"127.0.0.1\" | findstr /V \"169.254\" | findstr /V \"172.\"",
+    "network:urls": "node -e \"const os = require('os'); const nets = os.networkInterfaces(); const ips = []; Object.keys(nets).forEach(name => { if(name.includes('WiFi') || name.includes('Ethernet') || name.includes('Wi-Fi')) { nets[name].forEach(net => { if(net.family === 'IPv4' && !net.internal && !net.address.startsWith('172.') && !net.address.startsWith('169.254')) { ips.push(net.address); } }); } }); ips.forEach(ip => { console.log(`Frontend: http://${ip}:3000`); console.log(`Worker: http://${ip}:8787`); console.log('---'); });\"",
+    "upgrade": "npm prune && npm list -g npm-check-updates || npm i -g npm-check-updates && npx ncu -u && npm update",
+    "upgrade:check": "npx ncu"
+  },
+  "dependencies": {
+    "gun": "^0.2020.1241",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.27"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "wrangler": "^4.26.0"
+  }
+}

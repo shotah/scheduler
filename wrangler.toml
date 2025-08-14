@@ -1,0 +1,10 @@
+name = "webrtc-signal"
+main = "src/worker.ts"
+compatibility_date = "2024-05-01"
+
+[dev]
+ip = "0.0.0.0"  # Allow access from other devices on LAN
+port = 8787
+
+[env.production]
+name = "scheduler-signal"
