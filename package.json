@@ -37,7 +37,9 @@
     "test:all": "npm run test && npm run test:e2e",
     "test:setup": "playwright install",
     "debug:p2p": "node scripts/debug-p2p.js",
-    "debug:network": "npm run network:info && npm run network:urls"
+    "debug:network": "npm run network:info && npm run network:urls",
+    "debug:worker": "curl http://localhost:8787/debug",
+    "setup:lan": "node scripts/setup-lan.js"
   },
   "dependencies": {
     "react": "^18.3.1",

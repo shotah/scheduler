@@ -6,13 +6,65 @@ export async function createRoom(): Promise<string> {
   return roomId;
 }
 
+// Get client's own IP address for local network discovery
+async function getClientIP(): Promise<string | null> {
+  try {
+    // For local development, extract IP from the discovery service URL
+    const BASE_URL = import.meta.env.VITE_SIGNAL_URL || "http://127.0.0.1:8787";
+    const url = new URL(BASE_URL);
+    
+    // If using a LAN IP for the discovery service, use that same IP
+    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+      console.log('🏠 Using LAN IP from discovery service URL:', url.hostname);
+      return url.hostname;
+    }
+    
+    // Fallback: try to get local IP via WebRTC ICE candidates
+    try {
+      const pc = new RTCPeerConnection({iceServers:[]});
+      pc.createDataChannel('test');
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          pc.close();
+          resolve(null);
+        }, 2000);
+        
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            const match = event.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+            if (match && match[1] && !match[1].startsWith('127.') && !match[1].startsWith('169.254.')) {
+              clearTimeout(timeout);
+              pc.close();
+              console.log('🗳️ Detected LAN IP via ICE candidate:', match[1]);
+              resolve(match[1]);
+            }
+          }
+        };
+      });
+    } catch (error) {
+      console.warn('WebRTC IP detection failed:', error);
+      return null;
+    }
+  } catch (error) {
+    console.warn('Client IP detection failed:', error);
+    return null;
+  }
+}
+
 // Register this peer's IP address for discovery
 export async function registerPeer(roomId: string, peerId: string): Promise<string | null> {
   try {
+    // Auto-detect client IP for local development
+    const clientIP = await getClientIP();
+    console.log('🔍 Auto-detected client IP:', clientIP || 'detection failed');
+    
     const res = await fetch(`${BASE}/discovery/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomId, peerId }),
+      body: JSON.stringify({ roomId, peerId, clientIP }),
     });
     const data = await res.json();
     return data.success ? data.registeredIP : null;
@@ -35,13 +87,13 @@ export async function discoverPeers(roomId: string, peerId: string): Promise<Arr
 }
 
 // WebRTC Signaling Functions for LAN-only P2P
-export async function sendWebRTCOffer(roomId: string, peerId: string, offer: RTCSessionDescriptionInit): Promise<void> {
+export async function sendWebRTCOffer(roomId: string, peerId: string, offer: RTCSessionDescriptionInit, targetPeerId?: string): Promise<void> {
   const response = await fetch(`${BASE}/webrtc/offer`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ roomId, peerId, offer }),
+    body: JSON.stringify({ roomId, peerId, targetPeerId, offer }),
   });
 
   if (!response.ok) {
@@ -49,7 +101,7 @@ export async function sendWebRTCOffer(roomId: string, peerId: string, offer: RTC
   }
 }
 
-export async function getWebRTCOffer(roomId: string, peerId: string): Promise<RTCSessionDescriptionInit | null> {
+export async function getWebRTCOffer(roomId: string, peerId: string): Promise<{offer: RTCSessionDescriptionInit | null; fromPeerId: string | null}> {
   const response = await fetch(`${BASE}/webrtc/offer?roomId=${roomId}&peerId=${peerId}`, {
     method: 'GET',
     headers: {
@@ -62,16 +114,16 @@ export async function getWebRTCOffer(roomId: string, peerId: string): Promise<RT
   }
 
   const data = await response.json();
-  return data.offer;
+  return { offer: data.offer, fromPeerId: data.fromPeerId };
 }
 
-export async function sendWebRTCAnswer(roomId: string, peerId: string, answer: RTCSessionDescriptionInit): Promise<void> {
+export async function sendWebRTCAnswer(roomId: string, peerId: string, answer: RTCSessionDescriptionInit, targetPeerId?: string): Promise<void> {
   const response = await fetch(`${BASE}/webrtc/answer`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ roomId, peerId, answer }),
+    body: JSON.stringify({ roomId, peerId, targetPeerId, answer }),
   });
 
   if (!response.ok) {

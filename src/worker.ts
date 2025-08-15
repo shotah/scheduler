@@ -5,10 +5,43 @@ export interface Env {}
 const peerDiscovery = new Map<string, Map<string, { ip: string; timestamp: number }>>();
 
 // Minimal WebRTC signaling for LAN-only handshake (temporary storage)
-const signalingOffers = new Map<string, { offer: any; timestamp: number }>();
-const signalingAnswers = new Map<string, { answer: any; timestamp: number }>();
+interface OfferData {
+  offer: any;
+  fromPeerId: string;
+  targetPeerId: string;
+  timestamp: number;
+}
+
+interface AnswerData {
+  answer: any;
+  fromPeerId: string;
+  targetPeerId: string;
+  timestamp: number;
+}
+
+const signalingOffers = new Map<string, OfferData>();
+const signalingAnswers = new Map<string, AnswerData>();
 
 // NO TASK STORAGE - this is pure IP discovery only!
+
+// Helper function to extract client IP for local development
+function getClientIPFromSocket(request: Request): string | null {
+  try {
+    // For local development, try to get IP from connection
+    const url = new URL(request.url);
+    
+    // If it's localhost/127.0.0.1, try to get actual LAN IP
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
+      // In local dev, we can't detect the real client IP reliably
+      // Return null to trigger IP discovery from client side
+      return null;
+    }
+    
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export default {
   async fetch(request: Request): Promise<Response> {
@@ -31,16 +64,19 @@ export default {
     // Register peer IP address for discovery
     if (request.method === "POST" && pathname === "/discovery/register") {
       try {
-        const { roomId, peerId } = await request.json();
+        const { roomId, peerId, clientIP: providedIP } = await request.json();
         
         if (!roomId || !peerId) {
           return json({ error: "Missing required fields: roomId, peerId" }, 400);
         }
 
-        // Get client IP from request headers
-        const clientIP = request.headers.get('CF-Connecting-IP') || 
+        // Use provided IP first (for local dev), then try headers
+        const clientIP = providedIP ||
+                        request.headers.get('CF-Connecting-IP') || 
                         request.headers.get('X-Forwarded-For') || 
-                        request.headers.get('X-Real-IP') || 
+                        request.headers.get('X-Real-IP') ||
+                        request.headers.get('x-forwarded-for') ||
+                        getClientIPFromSocket(request) ||
                         'unknown';
 
         // Initialize room if it doesn't exist
@@ -54,15 +90,18 @@ export default {
           timestamp: Date.now()
         });
 
-        // Clean up old entries (older than 10 minutes)
-        const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+        // Clean up old entries (older than 8 hours - full clinic day)
+        const eightHoursAgo = Date.now() - (8 * 60 * 60 * 1000);
         for (const [id, data] of roomPeers.entries()) {
-          if (data.timestamp < tenMinutesAgo) {
+          if (data.timestamp < eightHoursAgo) {
             roomPeers.delete(id);
           }
         }
 
-        // No logging of who's in what room - privacy first!
+        // Debug logging for development (remove in production)
+        console.log(`🔍 [REGISTER] Room: ${roomId}, Peer: ${peerId}, IP: ${clientIP}`);
+        console.log(`📊 [REGISTER] Room ${roomId} now has ${roomPeers.size} peers`);
+        
         return json({ success: true, registeredIP: clientIP });
         
       } catch (error) {
@@ -87,7 +126,10 @@ export default {
         .filter(([id]) => id !== peerId)
         .map(([id, data]) => ({ peerId: id, ip: data.ip }));
       
-              // No logging of discovery activity - privacy first!
+      // Debug logging for development
+      console.log(`🔍 [DISCOVER] Room: ${roomId}, Requester: ${peerId.substring(0,8)}...`);
+      console.log(`📊 [DISCOVER] Found ${otherPeers.length} other peers:`, otherPeers.map(p => `${p.peerId.substring(0,8)}...→${p.ip}`));
+      
       return json({ peers: otherPeers });
     }
 
@@ -96,18 +138,29 @@ export default {
     // WebRTC Signaling - POST offer
     if (request.method === "POST" && pathname === "/webrtc/offer") {
       try {
-        const { roomId, peerId, offer } = await request.json();
+        const { roomId, peerId, targetPeerId, offer } = await request.json();
         if (!roomId || !peerId || !offer) {
           return json({ error: "Missing required fields: roomId, peerId, offer" }, 400);
         }
         
-        const key = `${roomId}:${peerId}`;
-        signalingOffers.set(key, { offer, timestamp: Date.now() });
+        // Store offer with room-specific key (multiple offers per room)
+        // If targetPeerId specified, use targeted key; otherwise use broadcast key
+        const key = targetPeerId ? `${roomId}:${targetPeerId}` : `${roomId}:broadcast:${peerId}`;
+        signalingOffers.set(key, { 
+          offer, 
+          fromPeerId: peerId,
+          targetPeerId: targetPeerId || 'broadcast',
+          timestamp: Date.now() 
+        });
         
-        // Cleanup old offers (2 minutes)
-        const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
+        // Debug logging for development
+        console.log(`📤 [OFFER] Stored offer from ${peerId.substring(0,8)}... ${targetPeerId ? `to ${targetPeerId.substring(0,8)}...` : 'as broadcast'} in room ${roomId}`);
+        console.log(`📊 [OFFER] Key: ${key}, Total offers stored: ${signalingOffers.size}`);
+        
+        // Cleanup old offers (30 minutes - allow for breaks/delays)
+        const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
         for (const [k, v] of signalingOffers.entries()) {
-          if (v.timestamp < twoMinutesAgo) {
+          if (v.timestamp < thirtyMinutesAgo) {
             signalingOffers.delete(k);
           }
         }
@@ -127,27 +180,60 @@ export default {
         return json({ error: "Missing required parameters: roomId, peerId" }, 400);
       }
       
-      const key = `${roomId}:${peerId}`;
-      const offerData = signalingOffers.get(key);
+      // Look for offers targeted to this peer first
+      const targetedKey = `${roomId}:${peerId}`;
+      let offerData = signalingOffers.get(targetedKey);
       
-      return json({ offer: offerData?.offer || null });
+      // If no targeted offer, look for broadcast offers from other peers
+      if (!offerData) {
+        for (const [key, data] of signalingOffers.entries()) {
+          if (key.startsWith(`${roomId}:broadcast:`) && data.fromPeerId !== peerId) {
+            offerData = data;
+            break;
+          }
+        }
+      }
+      
+      // Debug logging for development
+      console.log(`📨 [GET OFFER] Request from ${peerId.substring(0,8)}... in room ${roomId}`);
+      console.log(`📊 [GET OFFER] Checked targeted key: ${targetedKey}`);
+      console.log(`📊 [GET OFFER] Offer ${offerData ? 'FOUND' : 'NOT FOUND'} ${offerData ? `from ${offerData.fromPeerId.substring(0,8)}...` : ''}`);
+      
+      if (!offerData) {
+        console.log(`🔍 [GET OFFER] Available offers:`, Array.from(signalingOffers.keys()));
+      }
+      
+      return json({ 
+        offer: offerData?.offer || null,
+        fromPeerId: offerData?.fromPeerId || null
+      });
     }
 
     // WebRTC Signaling - POST answer
     if (request.method === "POST" && pathname === "/webrtc/answer") {
       try {
-        const { roomId, peerId, answer } = await request.json();
+        const { roomId, peerId, targetPeerId, answer } = await request.json();
         if (!roomId || !peerId || !answer) {
           return json({ error: "Missing required fields: roomId, peerId, answer" }, 400);
         }
         
-        const key = `${roomId}:${peerId}`;
-        signalingAnswers.set(key, { answer, timestamp: Date.now() });
+        // Store answer targeted to the original offer sender
+        const key = targetPeerId ? `${roomId}:${targetPeerId}` : `${roomId}:${peerId}`;
+        signalingAnswers.set(key, { 
+          answer, 
+          fromPeerId: peerId,
+          targetPeerId: targetPeerId || 'unknown',
+          timestamp: Date.now() 
+        });
         
-        // Cleanup old answers (2 minutes)
-        const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
+        // Debug logging for development
+        console.log(`📥 [ANSWER] Stored answer from ${peerId.substring(0,8)}... ${targetPeerId ? `to ${targetPeerId.substring(0,8)}...` : 'as broadcast'} in room ${roomId}`);
+        console.log(`📊 [ANSWER] Key: ${key}, Total answers stored: ${signalingAnswers.size}`);
+        
+        // Cleanup old answers (30 minutes - allow for breaks/delays)
+        const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
         for (const [k, v] of signalingAnswers.entries()) {
-          if (v.timestamp < twoMinutesAgo) {
+          if (v.timestamp < thirtyMinutesAgo) {
             signalingAnswers.delete(k);
           }
         }
@@ -170,7 +256,40 @@ export default {
       const key = `${roomId}:${peerId}`;
       const answerData = signalingAnswers.get(key);
       
+      // Debug logging for development
+      console.log(`📨 [GET ANSWER] Request from ${peerId.substring(0,8)}... in room ${roomId}`);
+      console.log(`📊 [GET ANSWER] Answer ${answerData ? 'FOUND' : 'NOT FOUND'} for key: ${key}`);
+      
+      if (!answerData) {
+        console.log(`🔍 [GET ANSWER] Available answers:`, Array.from(signalingAnswers.keys()));
+      }
+      
       return json({ answer: answerData?.answer || null });
+    }
+
+    // Debug endpoint to view current state
+    if (request.method === "GET" && pathname === "/debug") {
+      return json({
+        status: "debug",
+        timestamp: new Date().toISOString(),
+        rooms: Array.from(peerDiscovery.entries()).map(([roomId, peers]) => ({
+          roomId,
+          peerCount: peers.size,
+          peers: Array.from(peers.entries()).map(([peerId, data]) => ({
+            peerId: peerId.substring(0,8) + '...',
+            ip: data.ip,
+            age: Math.round((Date.now() - data.timestamp) / 1000) + 's'
+          }))
+        })),
+        offers: {
+          count: signalingOffers.size,
+          keys: Array.from(signalingOffers.keys())
+        },
+        answers: {
+          count: signalingAnswers.size,
+          keys: Array.from(signalingAnswers.keys())
+        }
+      });
     }
 
     // Health check

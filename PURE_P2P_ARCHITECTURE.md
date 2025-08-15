@@ -74,15 +74,46 @@ flowchart TD
 
 ### Common P2P Sync Issues
 
-#### 🚨 Issue: "comp → comp ????" 
+#### ✅ **FIXED: WebRTC Offer/Answer Mismatch**
+**Problem**: Offers stored with sender ID, but peers looking for offers addressed to them
+**Solution**: Fixed key system to use recipient IDs
 
-**Problem**: WebRTC data channel not establishing
+#### 🚨 **Current Issue: Data Channel Stuck "connecting"** 
+
+**Problem**: WebRTC data channel stuck in "connecting" state
 
 **Root Causes**:
-1. **Windows Firewall** blocking dynamic WebRTC ports
-2. **NAT traversal** failing (should work on LAN though)
-3. **ICE candidate gathering** taking too long
-4. **WebRTC offer/answer timeout** (currently no timeout handling)
+1. **mDNS ICE candidates**: Using `.local` addresses instead of real IPs
+2. **Windows Firewall** blocking dynamic WebRTC ports
+3. **ICE candidate priority** issues between devices
+
+**Symptoms in logs**:
+```
+🗳️ ICE Candidate found: {address: "1c449f36-29de-4bba-963c.local", port: 51272}
+📊 Data channel state: connecting (stuck here!)
+⚠️ Task added locally only - WebRTC not ready: {readyState: "connecting"}
+```
+
+#### 🏥 **FIXED: Clinic Workflow Timeouts**
+
+**Previous timeouts were too aggressive:**
+- ❌ Peer discovery: 10 minutes  
+- ❌ WebRTC offers: 2 minutes
+- ❌ WebRTC answers: 2 minutes
+
+**New clinic-friendly timeouts:**
+- ✅ **Peer discovery: 8 hours** (full clinic day)
+- ✅ **WebRTC offers: 30 minutes** (allows for breaks/delays)  
+- ✅ **WebRTC answers: 30 minutes** (allows for breaks/delays)
+
+**Real Clinic Scenario Now Works:**
+```
+8:00 AM - Dr. Smith creates room → IP registered for 8 hours
+10:30 AM - Dr. Smith leaves for surgery
+11:00 AM - Hygienist arrives → Can still join! ✅
+2:00 PM - Dr. Jones arrives → Room still active! ✅
+6:00 PM - End of day → Room expires naturally
+```
 
 **Debug Commands**:
 ```bash

@@ -131,11 +131,15 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
   const createWebRTCConnection = useCallback(async (roomId: string, targetPeerId: string) => {
     try {
       console.log('🔗 Creating LAN-only WebRTC connection to:', targetPeerId);
-      console.log('🔍 Debug: WebRTC Configuration - LAN-only mode (no STUN/TURN servers)');
+      console.log('🔍 Debug: WebRTC Configuration - LAN-only mode to avoid hairpin NAT issues');
       
       // Create peer connection with NO external servers (LAN-only!)
+      // Force real IP candidates instead of mDNS
       const peerConnection = new RTCPeerConnection({
-        iceServers: [] // Empty = LAN-only, no STUN/TURN servers
+        iceServers: [], // LAN-only - no external STUN to avoid hairpin NAT issues
+        iceCandidatePoolSize: 10,
+        bundlePolicy: 'balanced',
+        rtcpMuxPolicy: 'require'
       });
       
       peerConnectionRef.current = peerConnection;
@@ -153,17 +157,39 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
       // ICE connection state logging
       peerConnection.oniceconnectionstatechange = () => {
         console.log('🧊 ICE Connection State:', peerConnection.iceConnectionState);
+        
+        if (peerConnection.iceConnectionState === 'failed') {
+          console.error('❌ ICE connection failed - likely firewall blocking WebRTC ports');
+          console.log('🔧 Try running: debug-firewall-setup.bat as Administrator');
+        } else if (peerConnection.iceConnectionState === 'disconnected') {
+          console.warn('⚠️ ICE connection disconnected');
+        } else if (peerConnection.iceConnectionState === 'connected') {
+          console.log('✅ ICE connection successful!');
+        }
       };
       
-      // ICE candidate logging
+      // ICE candidate logging with IP preference
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          console.log('🗳️ ICE Candidate found:', {
+          const isActualIP = event.candidate.address && 
+                           !event.candidate.address.endsWith('.local') &&
+                           /^\d+\.\d+\.\d+\.\d+$/.test(event.candidate.address);
+          
+          console.log(`🗳️ ICE Candidate found (${isActualIP ? 'REAL IP' : 'mDNS'}):`, {
             type: event.candidate.type,
             protocol: event.candidate.protocol,
             address: event.candidate.address,
-            port: event.candidate.port
+            port: event.candidate.port,
+            priority: event.candidate.priority
           });
+          
+          if (!isActualIP && event.candidate.address.endsWith('.local')) {
+            console.warn('⚠️ mDNS candidate detected - may cause connection issues between devices');
+            console.log('💡 Suggestion: Both devices are on same LAN, try disabling mDNS in Chrome');
+            console.log('💡 Alternative: Chrome flag --force-webrtc-ip-handling-policy=default');
+          } else if (isActualIP && event.candidate.address.startsWith('192.168.')) {
+            console.log('🎉 PERFECT! Found LAN IP candidate - this should work!');
+          }
         } else {
           console.log('🏁 ICE candidate gathering complete');
         }
@@ -187,6 +213,31 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
         });
         setConnectionStatus('Connected! 🎉 Real-time P2P active');
       };
+      
+      // Monitor data channel state transitions with timeout
+      let connectingTimeout = 0;
+      const monitorDataChannel = () => {
+        console.log('📊 Data channel state:', dataChannel.readyState);
+        if (dataChannel.readyState === 'connecting') {
+          connectingTimeout++;
+          console.log(`⏳ Data channel connecting... waiting for ICE to complete (${connectingTimeout}/30)`);
+          
+          if (connectingTimeout >= 30) {
+            console.error('❌ Data channel connection timeout after 30 seconds');
+            console.log('🔧 This suggests a firewall or NAT issue blocking the connection');
+            setConnectionStatus('Connection timeout - check firewall settings');
+            return;
+          }
+          
+          setTimeout(monitorDataChannel, 1000);
+        } else if (dataChannel.readyState === 'open') {
+          console.log('✅ Data channel fully opened!');
+          connectingTimeout = 0;
+        } else if (dataChannel.readyState === 'closed') {
+          console.log('❌ Data channel closed');
+        }
+      };
+      setTimeout(monitorDataChannel, 100);
       
       dataChannel.onerror = (error) => {
         console.error('❌ Data channel error:', error);
@@ -231,7 +282,7 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
       
-      await sendWebRTCOffer(roomId, targetPeerId, offer);
+      await sendWebRTCOffer(roomId, myPeerIdRef.current, offer, targetPeerId);
       console.log('📤 Sent WebRTC offer via signaling server');
       
       // Wait for answer
@@ -256,17 +307,21 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
   const handleIncomingOffer = useCallback(async (roomId: string) => {
     try {
       const myPeerId = myPeerIdRef.current;
-      const offer = await getWebRTCOffer(roomId, myPeerId);
+      const { offer, fromPeerId } = await getWebRTCOffer(roomId, myPeerId);
       if (!offer) {
         console.log('🔍 No WebRTC offer found yet, will check again later');
         return;
       }
       
-      console.log('📨 Received WebRTC offer, creating answer...');
+      console.log('📨 Received WebRTC offer from', fromPeerId?.substring(0,8) + '...', 'creating answer...');
       
       // Create peer connection with NO external servers (LAN-only!)
+      // Force real IP candidates instead of mDNS
       const peerConnection = new RTCPeerConnection({
-        iceServers: [] // Empty = LAN-only
+        iceServers: [], // LAN-only - no external STUN to avoid hairpin NAT issues
+        iceCandidatePoolSize: 10,
+        bundlePolicy: 'balanced',
+        rtcpMuxPolicy: 'require'
       });
       
       peerConnectionRef.current = peerConnection;
@@ -332,9 +387,9 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
       
-      // Send answer via signaling
-      await sendWebRTCAnswer(roomId, myPeerId, answer);
-      console.log('📤 Sent WebRTC answer via signaling server');
+      // Send answer via signaling, targeted to the offer sender
+      await sendWebRTCAnswer(roomId, myPeerId, answer, fromPeerId || undefined);
+      console.log('📤 Sent WebRTC answer via signaling server to', fromPeerId?.substring(0,8) + '...');
       
     } catch (error) {
       console.error('❌ Error handling WebRTC offer:', error);

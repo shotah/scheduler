@@ -206,9 +206,13 @@ To access from other devices on your network:
    netsh advfirewall firewall add rule name="Cloudflare Worker Dev" dir=in action=allow protocol=TCP localport=8787
    ```
 
-3. **Update discovery service URL** in other device's browser:
-   - Instead of `127.0.0.1:8787`, use your actual IP (from step 1)
-   - Or set `VITE_SIGNAL_URL=http://YOUR_IP:8787` in .env
+3. **Update discovery service URL** for LAN access:
+   - Create a `.env` file in project root:
+   ```bash
+   VITE_SIGNAL_URL=http://192.168.1.40:8787
+   ```
+   - Replace `192.168.1.40` with your actual IP from step 1
+   - This ensures both IP detection and WebRTC connections work properly
 
 ### 3. Test P2P Sync
 
@@ -236,6 +240,9 @@ If you're having sync problems, use these debugging tools:
 
 ### Quick Debug Commands
 ```bash
+# Set up LAN configuration automatically  
+npm run setup:lan
+
 # Check network and firewall configuration
 npm run debug:p2p
 
@@ -244,6 +251,9 @@ npm run debug:network
 
 # Test basic connectivity
 npm run test:connection
+
+# View worker debug information
+curl http://localhost:8787/debug
 ```
 
 ### 📊 Console Logging
