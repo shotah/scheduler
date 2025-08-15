@@ -1,57 +1,86 @@
-# scheduler
-p2p scheduling service
+# Scheduler - Pure P2P Work App
 
-- Hosts the SPA on Cloudflare Pages (or wherever).
-- Uses a tiny Cloudflare Worker only to pass SDP offers/answers between two peers.
-- LAN-only WebRTC (no STUN/TURN) → works perfectly on same network without any configuration.
-- Uses Y.js (CRDT) for conflict-free real-time collaboration via WebSockets.
+A **pure peer-to-peer work application** designed for small clinics. **NO SERVER STORAGE** - only direct browser-to-browser sync.
 
-## Roadmap (quick)
+## 🎯 Core Philosophy: SERVERLESS P2P
 
-Today
+**CRITICAL**: This is **NOT a server-based app**. The worker is ONLY a phone book for IP discovery.
 
-- Ship this LAN-only prototype.
-- Validate the UX promise: “No cloud DB. We only connect you once.”
+## Why This Exists
 
-Next
+**Privacy-First**: Data NEVER touches any server. Tasks sync directly between browsers on your network.
 
-- ✅ Migrated to Y.js (CRDT) for bulletproof real-time collaboration
-- Move Worker state to Durable Objects.
-- Add optional TURN (paid plan) for off-LAN / remote sync.
+**Cost-Effective**: Just pennies for IP discovery. Zero server costs, zero database fees.
 
-Later
+**Always Available**: Works entirely peer-to-peer. If worker goes down, existing connections keep working.
 
-- Package a local helper (brew/choco) for truly serverless discovery (no Worker at all).
-- Ship export/import/backup to encrypted file.
+## How It ACTUALLY Works
 
-Want me to:
+1. **Tech A** opens app → creates room → worker gives Tech A a room UUID
+2. **Tech A** registers IP address with worker → starts waiting for peers  
+3. **Tech B** joins room UUID → worker gives Tech B the IP of Tech A
+4. **Tech B** connects DIRECTLY to Tech A's browser → **WORKER IS FORGOTTEN**
+5. **All task data flows browser ↔ browser** - worker never sees tasks
 
-- Refactor the client to use Y.js + y-webrtc against this same Worker?
-- Rewrite the Worker using Durable Objects so it’s production-stable?
-- Add a TURN-enabled paid tier path (architecture + code)?
-- Tell me which direction you want to harden first, and I’ll ship the next code drop. 💪
+## Architecture: Pure P2P
+
+- **React SPA** - The actual application (hosted on CDN)
+- **Worker** - ONLY IP discovery (UUID → IP mapping, that's it!)
+- **Browser-to-Browser** - All data sync happens directly between browsers
+- **localStorage** - Each browser persists its own data locally
+
+## 🚫 NEVER IMPLEMENT (Anti-Roadmap)
+
+**These would break the pure P2P philosophy:**
+
+- ❌ Task storage in worker
+- ❌ WebRTC signaling in worker  
+- ❌ Any data persistence in worker
+- ❌ User tracking or analytics
+- ❌ Server-side task synchronization
+- ❌ Central database of any kind
+
+## ✅ Future Enhancements (P2P-Compatible)
+
+- **Better conflict resolution** between browsers
+- **Encrypted P2P communication** 
+- **File attachment sync** (browser-to-browser)
+- **Offline-first improvements**
+- **Local network auto-discovery** (eliminate worker entirely)
 
 
 ## Structure:
 
-### Cloudflare Worker (signaling relay)
+### Cloudflare Worker (Pure IP Discovery)
 
-Job: store & relay offer, answer, and (optionally) ICE candidates for a room.
-This is the bare-bones prototype. For production, move the state to Durable Objects / KV.
+**ONLY Job**: Maps room UUIDs to IP addresses. **NEVER STORES TASKS**.
 
-src/worker.ts
+- `POST /rooms` - Generate new room UUID
+- `POST /discovery/register` - Register peer's IP address for a room  
+- `GET /discovery/peers` - Get other peers' IP addresses in a room
+- `GET /health` - Returns "IP discovery only"
 
-### React SPA (very small demo)
+**What it NEVER does:**
+- ❌ Store tasks or any user data
+- ❌ Handle WebRTC signaling  
+- ❌ Track connections or users
+- ❌ Sync data between browsers
 
-Key choices:
+**File**: `src/worker.ts`
 
-- Y.js CRDT → automatic conflict resolution, works across any network.
-- No trickle ICE → we wait until ICE gathering is complete and send a single SDP blob (simplifies signaling).
-- Y.js CRDT for conflict-free collaborative editing.
+### React SPA (Pure P2P)
 
-src/signaling.ts
-src/webrtc.ts
-src/App.tsx
+**Architecture**:
+
+- **Direct browser-to-browser sync** → No intermediate servers
+- **localStorage persistence** → Each browser owns its data
+- **HTTP discovery** → Simple REST API to find peer IPs  
+- **Conflict resolution** → Simple last-writer-wins for POC
+
+**Files**:
+- `src/App.tsx` - Main application
+- `src/signaling.ts` - HTTP discovery API calls  
+- `src/hooks/useDirectP2PSync.ts` - Pure P2P sync logic
 
 ## Quick Start
 
@@ -66,7 +95,7 @@ npm start
 ```
 
 This will start:
-- **Cloudflare Worker** (WebSocket relay) on `http://0.0.0.0:8787`
+- **Cloudflare Worker** (Discovery Service) on `http://0.0.0.0:8787`
 - **React Frontend** on `http://0.0.0.0:3000` (or 3001 if 3000 is busy)
 
 ### 🌐 LAN Access Setup
@@ -92,7 +121,7 @@ To access from other devices on your network:
    netsh advfirewall firewall add rule name="Cloudflare Worker Dev" dir=in action=allow protocol=TCP localport=8787
    ```
 
-3. **Update signaling URL** in other device's browser:
+3. **Update discovery service URL** in other device's browser:
    - Instead of `127.0.0.1:8787`, use your actual IP (from step 1)
    - Or set `VITE_SIGNAL_URL=http://YOUR_IP:8787` in .env
 
@@ -110,9 +139,9 @@ To access from other devices on your network:
 1. Find your IP: `npm run network:info` (look for 192.168.x.x)
 2. On host device: Go to `http://YOUR_IP:3001` and create room
 3. On other device: Go to `http://YOUR_IP:3001` and join room
-4. Tasks sync instantly via Y.js WebSocket with automatic conflict resolution! 🌐
+4. Tasks sync instantly via direct P2P connections with automatic conflict resolution! 🌐
 
-**Note**: Y.js CRDT provides automatic conflict resolution and works reliably across any network via WebSocket. No more WebRTC headaches!
+**Note**: Uses HTTP discovery service to find peers, then establishes direct P2P connections via Y.js WebRTC. No data passes through external servers!
 
 **Development Note**: When you restart the worker dev server (`npm run worker:dev`), room data is cleared but rooms auto-recreate when accessed. URLs and room IDs remain valid!
 
@@ -120,7 +149,7 @@ To access from other devices on your network:
 
 ```bash
 # Run components separately
-npm run worker:dev    # Just the signaling server
+npm run worker:dev    # Just the discovery service
 npm run dev          # Just the frontend
 
 # Test the connection
@@ -141,9 +170,33 @@ npm run worker:deploy    # Deploy worker
 npm run pages:deploy     # Deploy frontend to Pages
 ```
 
+## Testing
+
+### Quick Test Commands
+```bash
+npm test                 # Run unit tests
+npm run test:e2e         # Run E2E tests (fully automated)
+npm run test:e2e:ts      # Run E2E tests (TypeScript runner)
+npm run test:all         # Run all tests (unit + E2E)
+npm run test:coverage    # Run with coverage report
+
+# Or use Makefile (recommended)
+make test                # Unit tests
+make test-e2e            # E2E tests (automated)
+make test-all            # All tests
+```
+
+### Test Structure
+- **Unit Tests** - React components and hooks
+- **Integration Tests** - Discovery service communication
+- **E2E Tests** - Multi-user collaboration scenarios
+- **Worker Tests** - HTTP discovery service functionality
+
+See `src/test/README.md` for detailed testing guide.
+
 ## Deploy
 
-### Worker (Signaling Server)
+### Worker (Discovery Service)
 ```bash
 npm run worker:deploy
 ```

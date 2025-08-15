@@ -1,13 +1,13 @@
 import React, { useEffect, useCallback } from "react";
 import { createRoom } from "./signaling";
-import { useYjsCollaboration } from "./hooks/useYjsCollaboration";
+import { useDirectP2PSync } from "./hooks/useDirectP2PSync";
 import { useSessionManager } from "./hooks/useSessionManager";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { RoomControls } from "./components/RoomControls";
 import { TaskList } from "./components/TaskList";
 
 export default function App() {
-  const collaboration = useYjsCollaboration();
+  const collaboration = useDirectP2PSync();
   const session = useSessionManager();
 
   // Initialize session restoration
@@ -49,12 +49,24 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 600, margin: "40px auto", fontFamily: "sans-serif" }}>
-      <h1>🚀 Real-time Task Sync (Y.js CRDT)</h1>
+      <h1>🚀 Direct P2P Task Sync</h1>
       
       <ConnectionStatus 
         status={enhancedStatus} 
         error={collaboration.connectionState === 'disconnected' && session.mode !== 'idle' ? 'Connection lost' : ''} 
       />
+
+      {/* Show connected users count always */}
+      <div style={{ 
+        marginBottom: "16px", 
+        padding: "8px", 
+        background: "#f5f5f5", 
+        borderRadius: "4px",
+        fontSize: "14px",
+        color: "#666"
+      }}>
+        Connected users: {collaboration.connectedUsers}
+      </div>
 
       <RoomControls
         mode={session.mode}

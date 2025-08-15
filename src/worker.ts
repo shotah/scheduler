@@ -1,92 +1,99 @@
 export interface Env {}
 
-// Cloudflare Workers WebSocket API types  
-declare const WebSocketPair: {
-  new(): [WebSocket, WebSocket];
-};
+// Simple in-memory storage for UUID to IP address discovery
+// Maps roomId -> Map<peerId, { ip: string, timestamp: number }>
+const peerDiscovery = new Map<string, Map<string, { ip: string; timestamp: number }>>();
 
-interface CloudflareWebSocket extends WebSocket {
-  accept(): void;
-}
-
-// Store WebSocket connections for each room
-const roomConnections = new Map<string, Set<WebSocket>>();
+// NO TASK STORAGE - this is pure IP discovery only!
 
 export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    // CORS
+    // CORS for all requests
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: corsHeaders(),
       });
     }
 
-    // Create a room
+    // Create a room (generates UUID)
     if (request.method === "POST" && pathname === "/rooms") {
       const roomId = crypto.randomUUID();
-      roomConnections.set(roomId, new Set());
       return json({ roomId });
     }
 
-    // WebSocket upgrade for Y.js collaboration
-    // Y.js WebsocketProvider sends to /rooms/ROOM_ID format
-    const roomMatch = pathname.match(/^\/rooms\/([^/]+)$/);
-    if (roomMatch && request.headers.get("Upgrade") === "websocket") {
-      const roomId = roomMatch[1];
+    // Register peer IP address for discovery
+    if (request.method === "POST" && pathname === "/discovery/register") {
+      try {
+        const { roomId, peerId } = await request.json();
+        
+        if (!roomId || !peerId) {
+          return json({ error: "Missing required fields: roomId, peerId" }, 400);
+        }
+
+        // Get client IP from request headers
+        const clientIP = request.headers.get('CF-Connecting-IP') || 
+                        request.headers.get('X-Forwarded-For') || 
+                        request.headers.get('X-Real-IP') || 
+                        'unknown';
+
+        // Initialize room if it doesn't exist
+        if (!peerDiscovery.has(roomId)) {
+          peerDiscovery.set(roomId, new Map());
+        }
+
+        const roomPeers = peerDiscovery.get(roomId)!;
+        roomPeers.set(peerId, {
+          ip: clientIP,
+          timestamp: Date.now()
+        });
+
+        // Clean up old entries (older than 10 minutes)
+        const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+        for (const [id, data] of roomPeers.entries()) {
+          if (data.timestamp < tenMinutesAgo) {
+            roomPeers.delete(id);
+          }
+        }
+
+        // No logging of who's in what room - privacy first!
+        return json({ success: true, registeredIP: clientIP });
+        
+      } catch (error) {
+        console.error('Error registering peer:', error);
+        return json({ error: "Invalid request" }, 400);
+      }
+    }
+
+    // Discover peer IP addresses in a room
+    if (request.method === "GET" && pathname === "/discovery/peers") {
+      const roomId = url.searchParams.get('roomId');
+      const peerId = url.searchParams.get('peerId');
       
-      // Ensure room exists
-      if (!roomConnections.has(roomId)) {
-        roomConnections.set(roomId, new Set());
+      if (!roomId || !peerId) {
+        return json({ error: "Missing roomId or peerId parameter" }, 400);
       }
 
-      const [client, server] = new WebSocketPair();
-      (server as CloudflareWebSocket).accept();
+      const roomPeers = peerDiscovery.get(roomId) || new Map();
       
-      // Add to room
-      const connections = roomConnections.get(roomId)!;
-      connections.add(server);
-
-      // Handle messages - broadcast to all other clients in the room
-      server.addEventListener('message', (event: MessageEvent) => {
-        console.log(`[Room ${roomId}] Broadcasting message to ${connections.size - 1} other clients`);
-        const data = event.data;
-        connections.forEach(ws => {
-          if (ws !== server && ws.readyState === 1) { // 1 = OPEN
-            ws.send(data);
-          }
-        });
-      });
-
-      // Clean up on close
-      server.addEventListener('close', () => {
-        console.log(`[Room ${roomId}] Client disconnected. Remaining: ${connections.size - 1}`);
-        connections.delete(server);
-        if (connections.size === 0) {
-          console.log(`[Room ${roomId}] Room empty, cleaning up`);
-          roomConnections.delete(roomId);
-        }
-      });
-
-      console.log(`[Room ${roomId}] Client connected. Total: ${connections.size}`);
-
-      return new Response(null, {
-        status: 101,
-        // @ts-ignore - Cloudflare Workers WebSocket API
-        webSocket: client,
-        headers: corsHeaders(),
-      });
+      // Return IP addresses of other peers (exclude self)
+      const otherPeers = Array.from(roomPeers.entries())
+        .filter(([id]) => id !== peerId)
+        .map(([id, data]) => ({ peerId: id, ip: data.ip }));
+      
+              // No logging of discovery activity - privacy first!
+      return json({ peers: otherPeers });
     }
+
+    // NO TASK ENDPOINTS - browsers sync directly with each other!
 
     // Health check
     if (request.method === "GET" && pathname === "/health") {
       return json({ 
         status: "ok", 
-        activeRooms: roomConnections.size,
-        totalConnections: Array.from(roomConnections.values())
-          .reduce((sum, conns) => sum + conns.size, 0)
+        service: "IP discovery only"
       });
     }
 

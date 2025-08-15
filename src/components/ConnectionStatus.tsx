@@ -3,6 +3,7 @@ import React from 'react';
 interface ConnectionStatusProps {
   status: string;
   error: string;
+  users?: number;
 }
 
 export function ConnectionStatus({ status, error }: ConnectionStatusProps) {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 export type AppMode = 'idle' | 'hosting' | 'joining';
 
@@ -24,7 +24,12 @@ export function useSessionManager(): UseSessionManagerReturn {
   const saveSession = useCallback((roomId: string, mode: 'hosting' | 'joining') => {
     localStorage.setItem('scheduler_room_id', roomId);
     localStorage.setItem('scheduler_mode', mode);
-    window.history.replaceState({}, '', `?room=${roomId}`);
+    
+    // Update URL using URLSearchParams 
+    const urlParams = new URLSearchParams(window.location.search);
+    urlParams.set('room', roomId);
+    window.history.replaceState({}, '', `?${urlParams.toString()}`);
+    
     setRoomId(roomId);
     setMode(mode);
   }, []);
@@ -34,14 +39,19 @@ export function useSessionManager(): UseSessionManagerReturn {
     const urlParams = new URLSearchParams(window.location.search);
     const urlRoomId = urlParams.get('room');
     const storedRoomId = localStorage.getItem('scheduler_room_id');
-    const storedMode = localStorage.getItem('scheduler_mode') as 'hosting' | 'joining' | null;
+    const storedModeRaw = localStorage.getItem('scheduler_mode');
+    const storedMode = (storedModeRaw === 'hosting' || storedModeRaw === 'joining') ? storedModeRaw : null;
 
-    const sessionRoomId = urlRoomId || storedRoomId;
+    const sessionRoomId = storedRoomId || urlRoomId;
     
-    if (sessionRoomId && storedMode) {
-      setRoomId(sessionRoomId);
-      setMode(storedMode);
-      return { roomId: sessionRoomId, mode: storedMode };
+    if (sessionRoomId) {
+      // If we have a room ID from URL but no stored mode, default to joining
+      const sessionMode = storedMode || (urlRoomId ? 'joining' : null);
+      if (sessionMode) {
+        setRoomId(sessionRoomId);
+        setMode(sessionMode);
+        return { roomId: sessionRoomId, mode: sessionMode };
+      }
     }
     return null;
   }, []);
@@ -53,6 +63,11 @@ export function useSessionManager(): UseSessionManagerReturn {
     setRoomId('');
     setMode('idle');
   }, []);
+
+  // Auto-load session data on mount
+  useEffect(() => {
+    loadSession();
+  }, [loadSession]);
 
   return {
     roomId,
