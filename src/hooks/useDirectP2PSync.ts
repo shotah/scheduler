@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { createRoom, registerPeer, discoverPeers } from '../signaling';
+import { createRoom, registerPeer, discoverPeers, sendWebRTCOffer, getWebRTCOffer, sendWebRTCAnswer, getWebRTCAnswer } from '../signaling';
 
 export type Task = { id: string; text: string; done: boolean };
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -34,6 +34,9 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const peerIpsRef = useRef<string[]>([]);
   const isHostRef = useRef<boolean>(false);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const myPeerIdRef = useRef<string>(generateUUID());
 
   // Save tasks to localStorage
   const saveTasks = useCallback((newTasks: Task[]) => {
@@ -61,26 +64,47 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
 
     try {
       // Discover current peers
-      const discoveredPeers = await discoverPeers(roomId, 'self');
+      const myPeerId = myPeerIdRef.current;
+      const discoveredPeers = await discoverPeers(roomId, myPeerId);
       const currentPeerIps = discoveredPeers.map(p => p.ip);
       
       // Update connected users count
       setConnectedUsers(currentPeerIps.length + 1); // +1 for self
       
-      // If we're the host (first peer), our tasks are authoritative
-      // If we're joining, try to sync from other peers
-      if (!isHostRef.current && currentPeerIps.length > 0) {
-        // For POC: simulate fetching from first peer via localStorage
-        // In real implementation, this would be HTTP to peer's IP
-        const currentTasks = loadTasks(roomId);
+      // Load local tasks
+      const currentTasks = loadTasks(roomId);
+      setTasks(currentTasks);
+      
+      // Establish WebRTC P2P connections with discovered peers
+      if (discoveredPeers.length > 0 && !peerConnectionRef.current) {
+        console.log('🔄 Establishing WebRTC P2P connections:', discoveredPeers);
         
-        // Simple conflict resolution: if remote has more tasks, use those
-        // In real P2P, this would be HTTP GET to http://peerIP:port/tasks
-        console.log('🔄 Syncing with peers (POC mode):', currentPeerIps);
-        
-        if (currentTasks.length > 0) {
-          setTasks(currentTasks);
+        try {
+          if (isHostRef.current) {
+            // Host creates offers to all joiners
+            for (const peer of discoveredPeers) {
+              await createWebRTCConnection(roomId, peer.peerId);
+              break; // For now, just connect to first peer
+            }
+          } else {
+            // Joiner looks for incoming offers from host
+            await handleIncomingOffer(roomId);
+          }
+        } catch (error) {
+          console.warn('WebRTC connection attempt failed, continuing with basic connection:', error);
         }
+      }
+      
+      // Sync tasks via active WebRTC data channels
+      if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+        const message = {
+          type: 'TASK_SYNC',
+          tasks: currentTasks,
+          timestamp: Date.now(),
+          peerId: myPeerId
+        };
+        dataChannelRef.current.send(JSON.stringify(message));
+        console.log('📡 Synced tasks via WebRTC data channel');
       }
       
       peerIpsRef.current = currentPeerIps;
@@ -89,6 +113,233 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
       console.error('❌ Sync error:', error);
     }
   }, [loadTasks]);
+
+  // Merge two task lists with conflict resolution
+  const mergeTaskLists = useCallback((local: Task[], remote: Task[]): Task[] => {
+    const taskMap = new Map<string, Task>();
+    
+    // Add local tasks first
+    local.forEach(task => taskMap.set(task.id, task));
+    
+    // Add remote tasks (will overwrite local if IDs match - last writer wins)
+    remote.forEach(task => taskMap.set(task.id, task));
+    
+    return Array.from(taskMap.values()).sort((a, b) => a.id.localeCompare(b.id));
+  }, []);
+
+  // Create LAN-only WebRTC connection (host side)
+  const createWebRTCConnection = useCallback(async (roomId: string, targetPeerId: string) => {
+    try {
+      console.log('🔗 Creating LAN-only WebRTC connection to:', targetPeerId);
+      console.log('🔍 Debug: WebRTC Configuration - LAN-only mode (no STUN/TURN servers)');
+      
+      // Create peer connection with NO external servers (LAN-only!)
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [] // Empty = LAN-only, no STUN/TURN servers
+      });
+      
+      peerConnectionRef.current = peerConnection;
+      
+      // Enhanced logging for connection state changes
+      peerConnection.onconnectionstatechange = () => {
+        console.log('🔄 WebRTC Connection State:', peerConnection.connectionState);
+        if (peerConnection.connectionState === 'connected') {
+          console.log('🎉 P2P CONNECTION ESTABLISHED! Direct browser-to-browser link active');
+        } else if (peerConnection.connectionState === 'failed') {
+          console.error('❌ P2P CONNECTION FAILED! Check firewall/network settings');
+        }
+      };
+      
+      // ICE connection state logging
+      peerConnection.oniceconnectionstatechange = () => {
+        console.log('🧊 ICE Connection State:', peerConnection.iceConnectionState);
+      };
+      
+      // ICE candidate logging
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log('🗳️ ICE Candidate found:', {
+            type: event.candidate.type,
+            protocol: event.candidate.protocol,
+            address: event.candidate.address,
+            port: event.candidate.port
+          });
+        } else {
+          console.log('🏁 ICE candidate gathering complete');
+        }
+      };
+      
+      // Create data channel for task sync
+      const dataChannel = peerConnection.createDataChannel('tasks', {
+        ordered: true
+      });
+      
+      dataChannelRef.current = dataChannel;
+      
+      // Handle data channel messages
+      dataChannel.onopen = () => {
+        console.log('🎉 WebRTC data channel opened - ready for P2P sync!');
+        console.log('🔍 Data channel details:', {
+          label: dataChannel.label,
+          protocol: dataChannel.protocol,
+          readyState: dataChannel.readyState,
+          bufferedAmount: dataChannel.bufferedAmount
+        });
+        setConnectionStatus('Connected! 🎉 Real-time P2P active');
+      };
+      
+      dataChannel.onerror = (error) => {
+        console.error('❌ Data channel error:', error);
+      };
+      
+      dataChannel.onclose = () => {
+        console.log('🔌 Data channel closed');
+        setConnectionStatus('Connection lost - attempting to reconnect...');
+      };
+      
+      dataChannel.onmessage = (event) => {
+        try {
+          console.log('📨 Raw message received:', event.data.length, 'bytes');
+          const message = JSON.parse(event.data);
+          console.log('📡 Parsed message:', {
+            type: message.type,
+            taskCount: message.tasks?.length || 0,
+            peerId: message.peerId,
+            timestamp: new Date(message.timestamp).toLocaleTimeString()
+          });
+          
+          if (message.type === 'TASK_SYNC') {
+            console.log('🔄 Processing task sync from peer:', message.peerId);
+            const currentTasks = loadTasks(roomId);
+            console.log('📋 Current local tasks:', currentTasks.length);
+            console.log('📋 Incoming remote tasks:', message.tasks.length);
+            
+            const mergedTasks = mergeTaskLists(currentTasks, message.tasks);
+            console.log('🔀 Merged task count:', mergedTasks.length);
+            
+            setTasks(mergedTasks);
+            saveTasks(mergedTasks);
+            console.log('✅ Task sync completed successfully');
+          }
+        } catch (error) {
+          console.error('❌ Error handling WebRTC message:', error);
+          console.error('Raw data that failed to parse:', event.data);
+        }
+      };
+      
+      // Create offer and send via signaling
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      
+      await sendWebRTCOffer(roomId, targetPeerId, offer);
+      console.log('📤 Sent WebRTC offer via signaling server');
+      
+      // Wait for answer
+      const checkForAnswer = async () => {
+        const answer = await getWebRTCAnswer(roomId, myPeerIdRef.current);
+        if (answer) {
+          await peerConnection.setRemoteDescription(answer);
+          console.log('📨 Received WebRTC answer - P2P connection established!');
+        } else {
+          // Keep checking for answer
+          setTimeout(checkForAnswer, 1000);
+        }
+      };
+      checkForAnswer();
+      
+    } catch (error) {
+      console.error('❌ WebRTC connection failed:', error);
+    }
+  }, [loadTasks, saveTasks, mergeTaskLists]);
+
+  // Handle incoming WebRTC offers (joiner side)
+  const handleIncomingOffer = useCallback(async (roomId: string) => {
+    try {
+      const myPeerId = myPeerIdRef.current;
+      const offer = await getWebRTCOffer(roomId, myPeerId);
+      if (!offer) {
+        console.log('🔍 No WebRTC offer found yet, will check again later');
+        return;
+      }
+      
+      console.log('📨 Received WebRTC offer, creating answer...');
+      
+      // Create peer connection with NO external servers (LAN-only!)
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [] // Empty = LAN-only
+      });
+      
+      peerConnectionRef.current = peerConnection;
+      
+      // Handle incoming data channel
+      peerConnection.ondatachannel = (event) => {
+        const dataChannel = event.channel;
+        dataChannelRef.current = dataChannel;
+        console.log('📞 Incoming data channel received:', dataChannel.label);
+        
+        dataChannel.onopen = () => {
+          console.log('🎉 WebRTC data channel opened (incoming)');
+          console.log('🔍 Incoming data channel details:', {
+            label: dataChannel.label,
+            protocol: dataChannel.protocol,
+            readyState: dataChannel.readyState
+          });
+          setConnectionStatus('Connected! 🎉 Real-time P2P sync active');
+        };
+        
+        dataChannel.onerror = (error) => {
+          console.error('❌ Incoming data channel error:', error);
+        };
+        
+        dataChannel.onclose = () => {
+          console.log('🔌 Incoming data channel closed');
+          setConnectionStatus('Connection lost - attempting to reconnect...');
+        };
+        
+        dataChannel.onmessage = (event) => {
+          try {
+            console.log('📨 Raw message received (joiner):', event.data.length, 'bytes');
+            const message = JSON.parse(event.data);
+            console.log('📡 Parsed message (joiner):', {
+              type: message.type,
+              taskCount: message.tasks?.length || 0,
+              peerId: message.peerId,
+              timestamp: new Date(message.timestamp).toLocaleTimeString()
+            });
+            
+            if (message.type === 'TASK_SYNC') {
+              console.log('🔄 Processing task sync from peer (joiner):', message.peerId);
+              const currentTasks = loadTasks(roomId);
+              console.log('📋 Current local tasks (joiner):', currentTasks.length);
+              console.log('📋 Incoming remote tasks (joiner):', message.tasks.length);
+              
+              const mergedTasks = mergeTaskLists(currentTasks, message.tasks);
+              console.log('🔀 Merged task count (joiner):', mergedTasks.length);
+              
+              setTasks(mergedTasks);
+              saveTasks(mergedTasks);
+              console.log('✅ Task sync completed successfully (joiner)');
+            }
+          } catch (error) {
+            console.error('❌ Error handling WebRTC message (joiner):', error);
+            console.error('Raw data that failed to parse (joiner):', event.data);
+          }
+        };
+      };
+      
+      // Set remote offer and create answer
+      await peerConnection.setRemoteDescription(offer);
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      
+      // Send answer via signaling
+      await sendWebRTCAnswer(roomId, myPeerId, answer);
+      console.log('📤 Sent WebRTC answer via signaling server');
+      
+    } catch (error) {
+      console.error('❌ Error handling WebRTC offer:', error);
+    }
+  }, [loadTasks, saveTasks, mergeTaskLists]);
 
   const connect = useCallback(async (roomId: string) => {
     console.log('🔗 Starting pure P2P connection to room:', roomId);
@@ -101,16 +352,19 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
     setConnectionStatus('Registering with discovery service...');
 
     try {
-      // Register with discovery service to get IP mapping
-      await registerPeer(roomId, 'self');
+               // Register with discovery service to get IP mapping
+         const myPeerId = myPeerIdRef.current;
+         await registerPeer(roomId, myPeerId);
       console.log('✅ Registered IP with discovery service');
       
       // Load existing tasks from localStorage
       const existingTasks = loadTasks(roomId);
       setTasks(existingTasks);
       
-      // Check if we're the first peer (host)
-      const discoveredPeers = await discoverPeers(roomId, 'self');
+      // Removed problematic delay that was causing E2E test failures
+      
+               // Check if we're the first peer (host)
+         const discoveredPeers = await discoverPeers(roomId, myPeerId);
       isHostRef.current = discoveredPeers.length === 0;
       
       setConnectionState('connected');
@@ -123,8 +377,10 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
       // Start periodic sync with other peers
       syncIntervalRef.current = setInterval(syncWithPeers, 3000);
       
-      // Initial sync
-      await syncWithPeers();
+               // Initial sync
+         await syncWithPeers();
+         
+         console.log('🎯 Connection completed successfully!');
       
     } catch (error) {
       console.error('❌ Connection failed:', error);
@@ -137,6 +393,16 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
     if (syncIntervalRef.current) {
       clearInterval(syncIntervalRef.current);
       syncIntervalRef.current = null;
+    }
+    
+    // Clean up WebRTC connections
+    if (dataChannelRef.current) {
+      dataChannelRef.current.close();
+      dataChannelRef.current = null;
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
     }
     
     currentRoomRef.current = null;
@@ -158,10 +424,29 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
     setTasks(updatedTasks);
     saveTasks(updatedTasks);
     
-    // In real P2P, broadcast to all peer IPs:
-    // peerIpsRef.current.forEach(ip => {
-    //   fetch(`http://${ip}:port/tasks`, { method: 'POST', body: JSON.stringify(updatedTasks) })
-    // });
+    // Broadcast via WebRTC data channel
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      const message = {
+        type: 'TASK_SYNC',
+        tasks: updatedTasks,
+        timestamp: Date.now(),
+        peerId: myPeerIdRef.current
+      };
+      const messageStr = JSON.stringify(message);
+      console.log('📤 Broadcasting new task via WebRTC:', {
+        taskCount: updatedTasks.length,
+        messageSize: messageStr.length,
+        dataChannelState: dataChannelRef.current.readyState,
+        bufferedAmount: dataChannelRef.current.bufferedAmount
+      });
+      dataChannelRef.current.send(messageStr);
+      console.log('✅ Task broadcast completed');
+    } else {
+      console.log('⚠️ Task added locally only - WebRTC not ready:', {
+        hasDataChannel: !!dataChannelRef.current,
+        readyState: dataChannelRef.current?.readyState || 'null'
+      });
+    }
     
   }, [tasks, saveTasks]);
 
@@ -173,8 +458,30 @@ export function useDirectP2PSync(): UseDirectP2PSyncReturn {
     setTasks(updatedTasks);
     saveTasks(updatedTasks);
     
-    // In real P2P, broadcast to all peer IPs
-    console.log('📡 Broadcasting task update to peers:', peerIpsRef.current);
+    // Broadcast via WebRTC data channel
+    if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+      const message = {
+        type: 'TASK_SYNC',
+        tasks: updatedTasks,
+        timestamp: Date.now(),
+        peerId: myPeerIdRef.current
+      };
+      const messageStr = JSON.stringify(message);
+      console.log('📤 Broadcasting task toggle via WebRTC:', {
+        toggledTaskId: id,
+        taskCount: updatedTasks.length,
+        messageSize: messageStr.length,
+        dataChannelState: dataChannelRef.current.readyState,
+        bufferedAmount: dataChannelRef.current.bufferedAmount
+      });
+      dataChannelRef.current.send(messageStr);
+      console.log('✅ Task toggle broadcast completed');
+    } else {
+      console.log('⚠️ Task toggled locally only - WebRTC not ready:', {
+        hasDataChannel: !!dataChannelRef.current,
+        readyState: dataChannelRef.current?.readyState || 'null'
+      });
+    }
     
   }, [tasks, saveTasks]);
 

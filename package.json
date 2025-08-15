@@ -35,7 +35,9 @@
     "test:e2e:cleanup": "npm run test:e2e:kill",
     "test:e2e:ui": "npm run test:e2e:setup && playwright test --ui",
     "test:all": "npm run test && npm run test:e2e",
-    "test:setup": "playwright install"
+    "test:setup": "playwright install",
+    "debug:p2p": "node scripts/debug-p2p.js",
+    "debug:network": "npm run network:info && npm run network:urls"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -22,6 +22,91 @@ A **pure peer-to-peer work application** designed for small clinics. **NO SERVER
 4. **Tech B** connects DIRECTLY to Tech A's browser → **WORKER IS FORGOTTEN**
 5. **All task data flows browser ↔ browser** - worker never sees tasks
 
+### Communication Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant TA as Tech A Browser<br/>(Host)
+    participant W as Worker<br/>(Discovery Service)<br/>Port 8787
+    participant TB as Tech B Browser<br/>(Joiner)
+    
+    Note over TA,TB: Phase 1: Room Creation & Discovery
+    TA->>W: POST /rooms
+    W-->>TA: roomId: "abc-123"
+    
+    TA->>W: POST /discovery/register<br/>{roomId, peerId}
+    W-->>TA: ✅ IP registered
+    Note over W: Maps roomId → IP(192.168.1.100)
+    
+    TB->>W: GET /discovery/peers?roomId=abc-123
+    W-->>TB: [{peerId: "host", ip: "192.168.1.100"}]
+    
+    TB->>W: POST /discovery/register<br/>{roomId, peerId}
+    W-->>TB: ✅ IP registered
+    
+    Note over TA,TB: Phase 2: WebRTC Handshake (via Worker)
+    TA->>W: POST /webrtc/offer<br/>{roomId, peerId, offer}
+    W-->>TA: ✅ Offer stored
+    
+    TB->>W: GET /webrtc/offer?roomId=abc-123
+    W-->>TB: RTCSessionDescription(offer)
+    
+    TB->>W: POST /webrtc/answer<br/>{roomId, peerId, answer}
+    W-->>TB: ✅ Answer stored
+    
+    TA->>W: GET /webrtc/answer?roomId=abc-123
+    W-->>TA: RTCSessionDescription(answer)
+    
+    Note over TA,TB: Phase 3: Direct P2P Connection 🚀
+    TA<->>TB: WebRTC Data Channel<br/>DIRECT CONNECTION<br/>Port: Dynamic (49152-65535)
+    
+    Note over W: Worker is now OUT of the loop!
+    
+    Note over TA,TB: Phase 4: Task Sync (Pure P2P)
+    TA->>TB: {type: "TASK_SYNC", tasks: [...]}
+    TB->>TA: {type: "TASK_SYNC", tasks: [...]}
+    
+    Note over TA,TB: Real-time bidirectional sync!<br/>No server involved! 🎉
+```
+
+### Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "Browser A (192.168.1.100)"
+        A1[React App<br/>Port 3000]
+        A2[localStorage<br/>Tasks]
+        A3[WebRTC Peer<br/>Dynamic Port]
+    end
+    
+    subgraph "Browser B (192.168.1.101)"
+        B1[React App<br/>Port 3000]
+        B2[localStorage<br/>Tasks]
+        B3[WebRTC Peer<br/>Dynamic Port]
+    end
+    
+    subgraph "Discovery Service"
+        W[Worker<br/>Port 8787<br/>IP Discovery ONLY]
+    end
+    
+    A1 -.->|"1. Register IP"| W
+    B1 -.->|"2. Discover peers"| W
+    A1 -.->|"3. WebRTC offer"| W
+    B1 -.->|"4. WebRTC answer"| W
+    
+    A3 <====>|"5. Direct P2P Sync<br/>Task Data"| B3
+    
+    A1 <--> A2
+    B1 <--> B2
+    
+    style W fill:#ffe6e6
+    style A3 fill:#e6ffe6
+    style B3 fill:#e6ffe6
+    
+    classDef p2p stroke:#00ff00,stroke-width:3px
+    class A3,B3 p2p
+```
+
 ## Architecture: Pure P2P
 
 - **React SPA** - The actual application (hosted on CDN)
@@ -144,6 +229,39 @@ To access from other devices on your network:
 **Note**: Uses HTTP discovery service to find peers, then establishes direct P2P connections via Y.js WebRTC. No data passes through external servers!
 
 **Development Note**: When you restart the worker dev server (`npm run worker:dev`), room data is cleared but rooms auto-recreate when accessed. URLs and room IDs remain valid!
+
+## 🔧 Debugging P2P Issues
+
+If you're having sync problems, use these debugging tools:
+
+### Quick Debug Commands
+```bash
+# Check network and firewall configuration
+npm run debug:p2p
+
+# Get your LAN IP addresses for multi-device testing
+npm run debug:network
+
+# Test basic connectivity
+npm run test:connection
+```
+
+### 📊 Console Logging
+Open browser DevTools (F12) and look for these messages to track P2P connection status:
+
+- **Discovery Phase**: `🔗 Starting pure P2P connection` and `✅ Registered IP`
+- **WebRTC Handshake**: `🗳️ ICE Candidate found` and `📤 Sent WebRTC offer`  
+- **P2P Success**: `🎉 P2P CONNECTION ESTABLISHED!` and `🎉 WebRTC data channel opened`
+- **Task Sync**: `📤 Broadcasting new task` and `📨 Raw message received`
+
+### 🚨 Common Issues & Solutions
+
+| Problem | Quick Fix |
+|---------|-----------|
+| **"comp → comp ????"** | Run `npm run debug:p2p` → Follow firewall instructions |
+| **WebRTC timeout** | Restart both browsers, check Windows Firewall |
+| **No peers found** | Verify both devices use same discovery URL |
+| **Connection drops** | Check network stability, try closer WiFi |
 
 ### Alternative Commands
 

@@ -32,6 +32,162 @@ GET /health → "IP discovery only"
 5. **All task sync happens browser ↔ browser**
 6. **Worker is completely out of the loop**
 
+### P2P Communication Protocol Details
+
+```mermaid
+flowchart TD
+    A[Browser opens app] --> B[Register with Discovery Service<br/>HTTP POST to worker:8787]
+    B --> C[Get peer IPs<br/>HTTP GET from worker:8787]
+    C --> D[Initiate WebRTC handshake<br/>Offers/Answers via worker:8787]
+    D --> E[Establish direct P2P connection<br/>WebRTC Data Channel]
+    E --> F[Task sync via data channel<br/>JSON messages, Dynamic ports]
+    
+    G[comp → worker:8787] --> G1[✅ HTTP/REST API]
+    H[comp → server:3000] --> H1[✅ Vite dev server]
+    I[comp ↔ comp] --> I1[🔍 WebRTC Data Channel<br/>Ports: Dynamic 49152-65535]
+    
+    style I1 fill:#ffeeee
+    style G1 fill:#eeffee
+    style H1 fill:#eeffee
+```
+
+## Debugging P2P Communication Issues
+
+### What Actually Happens (Protocol Breakdown)
+
+1. **Discovery Phase** (HTTP to worker:8787) ✅
+   - `POST /rooms` → Get room UUID
+   - `POST /discovery/register` → Register IP address  
+   - `GET /discovery/peers` → Get other peer IPs
+   
+2. **WebRTC Handshake** (HTTP to worker:8787) ⚠️
+   - `POST /webrtc/offer` → Send SDP offer
+   - `GET /webrtc/offer` → Receive SDP offer
+   - `POST /webrtc/answer` → Send SDP answer
+   - `GET /webrtc/answer` → Receive SDP answer
+
+3. **Direct P2P Connection** (WebRTC Data Channel) ❓
+   - **Protocol**: WebRTC over UDP/TCP
+   - **Ports**: Dynamic allocation (typically 49152-65535)
+   - **Firewall**: May be blocked!
+   - **NAT**: Local network should work, internet NAT may fail
+
+### Common P2P Sync Issues
+
+#### 🚨 Issue: "comp → comp ????" 
+
+**Problem**: WebRTC data channel not establishing
+
+**Root Causes**:
+1. **Windows Firewall** blocking dynamic WebRTC ports
+2. **NAT traversal** failing (should work on LAN though)
+3. **ICE candidate gathering** taking too long
+4. **WebRTC offer/answer timeout** (currently no timeout handling)
+
+**Debug Commands**:
+```bash
+# Check if WebRTC ports are being blocked
+netstat -an | findstr "49152"  # Check for WebRTC ports
+
+# Allow WebRTC through firewall (run as Administrator)
+netsh advfirewall firewall add rule name="WebRTC P2P" dir=in action=allow protocol=UDP localportrange=49152-65535
+netsh advfirewall firewall add rule name="WebRTC P2P TCP" dir=in action=allow protocol=TCP localportrange=49152-65535
+```
+
+## Testing P2P Communication
+
+### Console Logging Strategy
+
+The app now includes comprehensive logging. Open browser DevTools (F12) and look for these key messages:
+
+#### Phase 1: Discovery ✅
+```
+🔗 Starting pure P2P connection to room: abc-123
+✅ Registered IP with discovery service
+```
+
+#### Phase 2: WebRTC Handshake ⚠️
+```
+🔗 Creating LAN-only WebRTC connection to: peer-456
+🔍 Debug: WebRTC Configuration - LAN-only mode
+🗳️ ICE Candidate found: {type: "host", protocol: "udp", address: "192.168.1.100", port: 51234}
+🏁 ICE candidate gathering complete
+📤 Sent WebRTC offer via signaling server
+📨 Received WebRTC answer - P2P connection established!
+```
+
+#### Phase 3: P2P Connection Success 🎉
+```
+🎉 P2P CONNECTION ESTABLISHED! Direct browser-to-browser link active
+🔄 WebRTC Connection State: connected
+🧊 ICE Connection State: connected
+🎉 WebRTC data channel opened - ready for P2P sync!
+```
+
+#### Phase 4: Task Sync Validation 🔄
+```
+📤 Broadcasting new task via WebRTC: {taskCount: 3, messageSize: 245, dataChannelState: "open"}
+✅ Task broadcast completed
+📨 Raw message received: 245 bytes
+📡 Parsed message: {type: "TASK_SYNC", taskCount: 3, peerId: "peer-456"}
+✅ Task sync completed successfully
+```
+
+### Debug Commands for Windows
+
+```powershell
+# 1. Check network connectivity
+ping 192.168.1.100  # Replace with actual peer IP
+
+# 2. Check WebRTC port availability
+netstat -an | findstr ":49"   # Look for WebRTC ports
+netstat -an | findstr ":50"   # Check higher range too
+
+# 3. Test firewall settings
+Test-NetConnection -ComputerName 192.168.1.100 -Port 8787
+Test-NetConnection -ComputerName 192.168.1.100 -Port 3000
+
+# 4. Check Windows Firewall rules
+netsh advfirewall firewall show rule name="WebRTC P2P"
+netsh advfirewall firewall show rule name="Vite Dev Server"
+
+# 5. Temporarily disable Windows Firewall (for testing only!)
+netsh advfirewall set allprofiles state off
+# Remember to re-enable: netsh advfirewall set allprofiles state on
+```
+
+### Manual Testing Checklist
+
+1. **☑️ Discovery Service Connection**
+   - Both devices can reach worker on port 8787
+   - Room creation works
+   - Peer registration successful
+
+2. **☑️ WebRTC Handshake**  
+   - ICE candidates are found
+   - Offer/answer exchange completes
+   - No firewall blocks on dynamic ports
+
+3. **☑️ Data Channel Establishment**
+   - Connection state becomes "connected"
+   - Data channel opens successfully
+   - No errors in console logs
+
+4. **☑️ Task Sync Validation**
+   - Messages send and receive properly
+   - Task counts match after sync
+   - No JSON parsing errors
+
+### Common Failure Points
+
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| **Firewall blocked** | ICE gathering fails | Run firewall commands above |
+| **Wrong IP detected** | Can't find peers | Check `VITE_SIGNAL_URL` env var |
+| **WebRTC timeout** | Connection state stays "connecting" | Restart both browsers |
+| **CORS issues** | HTTP errors to worker | Check worker is running on 8787 |
+| **Port conflicts** | Can't bind to 3000/8787 | Kill other processes using ports |
+
 ## Browser-to-Browser Sync (Current POC)
 
 - **Storage**: localStorage in each browser

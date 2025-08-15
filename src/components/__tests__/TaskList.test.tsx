@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TaskList } from '../TaskList';
-import { Task } from '../../hooks/useYjsCollaboration';
+import { Task } from '../../hooks/useDirectP2PSync';
 
 const mockTasks: Task[] = [
   { id: 'task-1', text: 'First task', done: false },

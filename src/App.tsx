@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { createRoom } from "./signaling";
 import { useDirectP2PSync } from "./hooks/useDirectP2PSync";
 import { useSessionManager } from "./hooks/useSessionManager";

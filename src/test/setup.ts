@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 
 // Mock WebSocket for tests
-global.WebSocket = jest.fn().mockImplementation(() => ({
+const MockWebSocket = jest.fn().mockImplementation(() => ({
   addEventListener: jest.fn(),
   removeEventListener: jest.fn(),
   send: jest.fn(),
@@ -12,6 +12,14 @@ global.WebSocket = jest.fn().mockImplementation(() => ({
   CLOSING: 2,
   CLOSED: 3,
 }));
+
+// Add static properties with type assertion to avoid lint errors
+(MockWebSocket as any).CONNECTING = 0;
+(MockWebSocket as any).OPEN = 1;
+(MockWebSocket as any).CLOSING = 2;
+(MockWebSocket as any).CLOSED = 3;
+
+global.WebSocket = MockWebSocket as any;
 
 // Mock crypto.randomUUID
 Object.defineProperty(global, 'crypto', {

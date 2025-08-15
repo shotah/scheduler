@@ -4,6 +4,10 @@ export interface Env {}
 // Maps roomId -> Map<peerId, { ip: string, timestamp: number }>
 const peerDiscovery = new Map<string, Map<string, { ip: string; timestamp: number }>>();
 
+// Minimal WebRTC signaling for LAN-only handshake (temporary storage)
+const signalingOffers = new Map<string, { offer: any; timestamp: number }>();
+const signalingAnswers = new Map<string, { answer: any; timestamp: number }>();
+
 // NO TASK STORAGE - this is pure IP discovery only!
 
 export default {
@@ -89,11 +93,91 @@ export default {
 
     // NO TASK ENDPOINTS - browsers sync directly with each other!
 
+    // WebRTC Signaling - POST offer
+    if (request.method === "POST" && pathname === "/webrtc/offer") {
+      try {
+        const { roomId, peerId, offer } = await request.json();
+        if (!roomId || !peerId || !offer) {
+          return json({ error: "Missing required fields: roomId, peerId, offer" }, 400);
+        }
+        
+        const key = `${roomId}:${peerId}`;
+        signalingOffers.set(key, { offer, timestamp: Date.now() });
+        
+        // Cleanup old offers (2 minutes)
+        const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
+        for (const [k, v] of signalingOffers.entries()) {
+          if (v.timestamp < twoMinutesAgo) {
+            signalingOffers.delete(k);
+          }
+        }
+        
+        return json({ success: true });
+      } catch (error) {
+        return json({ error: "Invalid JSON" }, 400);
+      }
+    }
+
+    // WebRTC Signaling - GET offer
+    if (request.method === "GET" && pathname === "/webrtc/offer") {
+      const roomId = url.searchParams.get('roomId');
+      const peerId = url.searchParams.get('peerId');
+      
+      if (!roomId || !peerId) {
+        return json({ error: "Missing required parameters: roomId, peerId" }, 400);
+      }
+      
+      const key = `${roomId}:${peerId}`;
+      const offerData = signalingOffers.get(key);
+      
+      return json({ offer: offerData?.offer || null });
+    }
+
+    // WebRTC Signaling - POST answer
+    if (request.method === "POST" && pathname === "/webrtc/answer") {
+      try {
+        const { roomId, peerId, answer } = await request.json();
+        if (!roomId || !peerId || !answer) {
+          return json({ error: "Missing required fields: roomId, peerId, answer" }, 400);
+        }
+        
+        const key = `${roomId}:${peerId}`;
+        signalingAnswers.set(key, { answer, timestamp: Date.now() });
+        
+        // Cleanup old answers (2 minutes)
+        const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
+        for (const [k, v] of signalingAnswers.entries()) {
+          if (v.timestamp < twoMinutesAgo) {
+            signalingAnswers.delete(k);
+          }
+        }
+        
+        return json({ success: true });
+      } catch (error) {
+        return json({ error: "Invalid JSON" }, 400);
+      }
+    }
+
+    // WebRTC Signaling - GET answer
+    if (request.method === "GET" && pathname === "/webrtc/answer") {
+      const roomId = url.searchParams.get('roomId');
+      const peerId = url.searchParams.get('peerId');
+      
+      if (!roomId || !peerId) {
+        return json({ error: "Missing required parameters: roomId, peerId" }, 400);
+      }
+      
+      const key = `${roomId}:${peerId}`;
+      const answerData = signalingAnswers.get(key);
+      
+      return json({ answer: answerData?.answer || null });
+    }
+
     // Health check
     if (request.method === "GET" && pathname === "/health") {
       return json({ 
         status: "ok", 
-        service: "IP discovery only"
+        service: "IP discovery + minimal WebRTC signaling"
       });
     }
 

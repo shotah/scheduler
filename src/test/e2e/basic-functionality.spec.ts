@@ -24,7 +24,7 @@ test.describe('Basic Application Functionality', () => {
     await expect(page.locator('text=Room ID:')).toBeVisible({ timeout: 10000 });
     
     // Should eventually connect as host
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('text=Connected users: 1')).toBeVisible();
     
     // Should show reset option
@@ -50,7 +50,7 @@ test.describe('Basic Application Functionality', () => {
   test('should handle task management in standalone mode', async ({ page }) => {
     // Host a workspace first
     await page.click('text=🏠 Host workspace');
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     
     // Should show empty task list initially
     await expect(page.locator('text=No tasks yet. Add one above! ✨')).toBeVisible();
@@ -83,7 +83,7 @@ test.describe('Basic Application Functionality', () => {
 
   test('should handle multiple tasks', async ({ page }) => {
     await page.click('text=🏠 Host workspace');
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     
     // Add multiple tasks
     const taskInput = page.locator('input[placeholder="Add a new task..."]');
@@ -109,7 +109,7 @@ test.describe('Basic Application Functionality', () => {
 
   test('should handle task input validation', async ({ page }) => {
     await page.click('text=🏠 Host workspace');
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     
     const taskInput = page.locator('input[placeholder="Add a new task..."]');
     const addButton = page.locator('text=➕ Add');
@@ -134,7 +134,7 @@ test.describe('Basic Application Functionality', () => {
 
   test('should support Enter key for adding tasks', async ({ page }) => {
     await page.click('text=🏠 Host workspace');
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     
     const taskInput = page.locator('input[placeholder="Add a new task..."]');
     
@@ -147,7 +147,7 @@ test.describe('Basic Application Functionality', () => {
 
   test('should handle reset functionality', async ({ page }) => {
     await page.click('text=🏠 Host workspace');
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     
     // Add a task first
     const taskInput = page.locator('input[placeholder="Add a new task..."]');
@@ -195,7 +195,7 @@ test.describe('Basic Application Functionality', () => {
     // Should auto-reconnect to the same room
     await expect(page.locator('text=Room ID:')).toBeVisible({ timeout: 15000 });
     await expect(page.locator(`text=${roomId}`)).toBeVisible();
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     
     // Task should still be there (persisted via Y.js)
     await expect(page.locator('text=Persistent task')).toBeVisible({ timeout: 10000 });
@@ -212,7 +212,7 @@ test.describe('Basic Application Functionality', () => {
     await expect(page.locator('text=Registering with discovery service')).toBeVisible({ timeout: 5000 });
     
     // Should eventually show connected state
-    await expect(page.locator('text=ℹ️ Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Connected as host! 🎉 Waiting for others...')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('text=Connected users: 1')).toBeVisible();
   });
 

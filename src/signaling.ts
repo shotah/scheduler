@@ -33,3 +33,64 @@ export async function discoverPeers(roomId: string, peerId: string): Promise<Arr
     return [];
   }
 }
+
+// WebRTC Signaling Functions for LAN-only P2P
+export async function sendWebRTCOffer(roomId: string, peerId: string, offer: RTCSessionDescriptionInit): Promise<void> {
+  const response = await fetch(`${BASE}/webrtc/offer`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ roomId, peerId, offer }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send WebRTC offer: ${response.statusText}`);
+  }
+}
+
+export async function getWebRTCOffer(roomId: string, peerId: string): Promise<RTCSessionDescriptionInit | null> {
+  const response = await fetch(`${BASE}/webrtc/offer?roomId=${roomId}&peerId=${peerId}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get WebRTC offer: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.offer;
+}
+
+export async function sendWebRTCAnswer(roomId: string, peerId: string, answer: RTCSessionDescriptionInit): Promise<void> {
+  const response = await fetch(`${BASE}/webrtc/answer`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ roomId, peerId, answer }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send WebRTC answer: ${response.statusText}`);
+  }
+}
+
+export async function getWebRTCAnswer(roomId: string, peerId: string): Promise<RTCSessionDescriptionInit | null> {
+  const response = await fetch(`${BASE}/webrtc/answer?roomId=${roomId}&peerId=${peerId}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get WebRTC answer: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.answer;
+}

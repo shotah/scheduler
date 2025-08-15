@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface ConnectionStatusProps {
   status: string;
   error: string;

@@ -4,10 +4,10 @@
  * Note: These tests use Cloudflare Workers testing utilities
  */
 
-import { unstable_dev, UnstableDevWorker } from 'wrangler';
+import { unstable_dev, Unstable_DevWorker } from 'wrangler';
 
 describe('Cloudflare Worker Discovery Service', () => {
-  let worker: UnstableDevWorker;
+  let worker: Unstable_DevWorker;
 
   beforeAll(async () => {
     // Start the worker in test mode
@@ -28,7 +28,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       expect(resp.status).toBe(200);
       
-      const data = await resp.json();
+      const data = await resp.json() as { roomId: string };
       expect(data).toHaveProperty('roomId');
       expect(data.roomId).toMatch(/^[a-f0-9\-]{36}$/); // UUID format
     });
@@ -72,7 +72,7 @@ describe('Cloudflare Worker Discovery Service', () => {
       const createResp = await worker.fetch('/rooms', {
         method: 'POST',
       });
-      const { roomId } = await createResp.json();
+      const { roomId } = await createResp.json() as { roomId: string };
 
       // Register a peer
       const resp = await worker.fetch('/discovery/register', {
@@ -88,7 +88,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       expect(resp.status).toBe(200);
       
-      const data = await resp.json();
+      const data = await resp.json() as { success: boolean, registeredIP: string };
       expect(data).toHaveProperty('success', true);
       expect(data).toHaveProperty('registeredIP');
       expect(typeof data.registeredIP).toBe('string');
@@ -112,7 +112,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
         expect(resp.status).toBe(400);
         
-        const data = await resp.json();
+        const data = await resp.json() as { error: string };
         expect(data).toHaveProperty('error');
         expect(data.error).toContain('Missing required fields');
       }
@@ -123,7 +123,7 @@ describe('Cloudflare Worker Discovery Service', () => {
       const createResp = await worker.fetch('/rooms', {
         method: 'POST',
       });
-      const { roomId } = await createResp.json();
+      const { roomId } = await createResp.json() as { roomId: string };
 
       // Register two peers
       await worker.fetch('/discovery/register', {
@@ -145,7 +145,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       expect(resp.status).toBe(200);
       
-      const data = await resp.json();
+      const data = await resp.json() as { peers: { peerId: string, ip: string }[] };
       expect(data).toHaveProperty('peers');
       expect(Array.isArray(data.peers)).toBe(true);
       expect(data.peers).toHaveLength(1);
@@ -158,7 +158,7 @@ describe('Cloudflare Worker Discovery Service', () => {
       const createResp = await worker.fetch('/rooms', {
         method: 'POST',
       });
-      const { roomId } = await createResp.json();
+      const { roomId } = await createResp.json() as { roomId: string };
 
       await worker.fetch('/discovery/register', {
         method: 'POST',
@@ -173,7 +173,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       expect(resp.status).toBe(200);
       
-      const data = await resp.json();
+      const data = await resp.json() as { peers: { peerId: string, ip: string }[] };
       expect(data.peers).toHaveLength(0); // Should not include self
     });
 
@@ -189,7 +189,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
         expect(resp.status).toBe(400);
         
-        const data = await resp.json();
+        const data = await resp.json() as { error: string };
         expect(data).toHaveProperty('error');
         expect(data.error).toContain('Missing');
       }
@@ -200,7 +200,7 @@ describe('Cloudflare Worker Discovery Service', () => {
     test('should track peer registration in health endpoint', async () => {
       // Get initial state
       const initialResp = await worker.fetch('/health');
-      const initialData = await initialResp.json();
+      const initialData = await initialResp.json() as { activeRooms: number, totalPeers: number };
       const initialRooms = initialData.activeRooms;
       const initialPeers = initialData.totalPeers;
 
@@ -208,7 +208,7 @@ describe('Cloudflare Worker Discovery Service', () => {
       const createResp = await worker.fetch('/rooms', {
         method: 'POST',
       });
-      const { roomId } = await createResp.json();
+      const { roomId } = await createResp.json() as { roomId: string };
 
       await worker.fetch('/discovery/register', {
         method: 'POST',
@@ -218,7 +218,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       // Check health endpoint shows updated counts
       const finalResp = await worker.fetch('/health');
-      const finalData = await finalResp.json();
+      const finalData = await finalResp.json() as { activeRooms: number, totalPeers: number };
       
       expect(finalData.activeRooms).toBe(initialRooms + 1);
       expect(finalData.totalPeers).toBe(initialPeers + 1);
@@ -232,7 +232,7 @@ describe('Cloudflare Worker Discovery Service', () => {
         const resp = await worker.fetch('/rooms', {
           method: 'POST',
         });
-        const data = await resp.json();
+        const data = await resp.json() as { roomId: string };
         roomIds.add(data.roomId);
       }
 
@@ -250,7 +250,7 @@ describe('Cloudflare Worker Discovery Service', () => {
       const createResp = await worker.fetch('/rooms', {
         method: 'POST',
       });
-      const { roomId } = await createResp.json();
+      const { roomId } = await createResp.json() as { roomId: string };
 
       // Register multiple peers to simulate activity
       for (let i = 0; i < 3; i++) {
@@ -265,7 +265,7 @@ describe('Cloudflare Worker Discovery Service', () => {
       const discoverResp = await worker.fetch(
         `/discovery/peers?roomId=${encodeURIComponent(roomId)}&peerId=peer-0`
       );
-      const data = await discoverResp.json();
+      const data = await discoverResp.json() as { peers: { peerId: string, ip: string }[] };
       expect(data.peers.length).toBeGreaterThan(0);
 
       // Note: Testing actual time-based cleanup would require waiting 10+ minutes
@@ -311,7 +311,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       expect(resp.status).toBe(200);
       
-      const data = await resp.json();
+      const data = await resp.json() as { peers: { peerId: string, ip: string }[] };
       expect(data).toHaveProperty('peers');
       expect(data.peers).toHaveLength(0);
     });
@@ -326,14 +326,14 @@ describe('Cloudflare Worker Discovery Service', () => {
       const responses = await Promise.all(promises);
 
       // All should succeed
-      responses.forEach((resp) => {
+      responses.forEach((resp: any) => {
         expect(resp.status).toBe(200);
       });
 
       // All room IDs should be unique
       const roomIds = await Promise.all(
-        responses.map(async (resp) => {
-          const data = await resp.json();
+        responses.map(async (resp: any) => {
+          const data = await resp.json() as { roomId: string };
           return data.roomId;
         })
       );
@@ -395,7 +395,7 @@ describe('Cloudflare Worker Discovery Service', () => {
         const resp = await worker.fetch('/rooms', {
           method: 'POST',
         });
-        const data = await resp.json();
+        const data = await resp.json() as { roomId: string };
         roomIds.add(data.roomId);
       }
 
@@ -410,7 +410,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
     test('should not expose internal state in health endpoint', async () => {
       const resp = await worker.fetch('/health');
-      const data = await resp.json();
+      const data = await resp.json() as { status: string, service: string, activeRooms: number, totalPeers: number };
 
       // Should only expose safe metrics for discovery service
       const allowedKeys = ['status', 'service', 'activeRooms', 'totalPeers'];
@@ -460,7 +460,7 @@ describe('Cloudflare Worker Discovery Service', () => {
     test('should protect against IP address exposure to unauthorized peers', async () => {
       // Create room and register two peers
       const createResp = await worker.fetch('/rooms', { method: 'POST' });
-      const { roomId } = await createResp.json();
+      const { roomId } = await createResp.json() as { roomId: string };
 
       const registerResp1 = await worker.fetch('/discovery/register', {
         method: 'POST',
@@ -477,7 +477,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       // Try to discover peers from a different room (should get empty list)
       const createResp2 = await worker.fetch('/rooms', { method: 'POST' });
-      const { roomId: otherRoomId } = await createResp2.json();
+      const { roomId: otherRoomId } = await createResp2.json() as { roomId: string };
 
       const discoverResp = await worker.fetch(
         `/discovery/peers?roomId=${encodeURIComponent(otherRoomId)}&peerId=unauthorized-peer`
@@ -485,7 +485,7 @@ describe('Cloudflare Worker Discovery Service', () => {
 
       expect(discoverResp.status).toBe(200);
       
-      const data = await discoverResp.json();
+      const data = await discoverResp.json() as { peers: { peerId: string, ip: string }[] };
       expect(data.peers).toHaveLength(0); // Should not see peers from other rooms
     });
   });

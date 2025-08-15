@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 type Task = { id: string; text: string; done: boolean };
 

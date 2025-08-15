@@ -6,7 +6,7 @@ test.describe('Real-time Collaboration', () => {
   let roomId: string;
 
   test.beforeEach(async ({ browser }) => {
-    // Create two browser contexts to simulate different users
+    // Use separate contexts to avoid conflicts
     const hostContext = await browser.newContext();
     const joinContext = await browser.newContext();
     
@@ -15,8 +15,17 @@ test.describe('Real-time Collaboration', () => {
   });
 
   test.afterEach(async () => {
-    await hostPage.close();
-    await joinPage.close();
+    // Proper cleanup
+    try {
+      if (hostPage && !hostPage.isClosed()) {
+        await hostPage.context().close();
+      }
+      if (joinPage && !joinPage.isClosed()) {
+        await joinPage.context().close();
+      }
+    } catch (error) {
+      console.log('Cleanup error (expected):', error instanceof Error ? error.message : 'Unknown error');
+    }
   });
 
   test('should establish host-join connection and sync tasks', async () => {
@@ -40,9 +49,9 @@ test.describe('Real-time Collaboration', () => {
     await joinPage.click('text=🔗 Join');
 
     // Wait for host to be connected as host
-    await hostPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...', { timeout: 15000 });
+    await hostPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...', { timeout: 15000 });
     // Wait for joiner to also be connected (POC: both think they're host until real P2P)
-    await joinPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...', { timeout: 15000 });
+    await joinPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...', { timeout: 15000 });
 
     // Verify user count (POC: may show 1 each until real P2P is implemented)
     await expect(hostPage.locator('text=Connected users:')).toBeVisible();
@@ -84,8 +93,8 @@ test.describe('Real-time Collaboration', () => {
     await joinPage.fill('input[placeholder="Enter room ID to join..."]', roomId);
     await joinPage.click('text=🔗 Join');
 
-    await hostPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
-    await joinPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
+    await hostPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
+    await joinPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
 
     // Host adds a task
     await hostPage.fill('input[placeholder="Add a new task..."]', 'Task to complete');
@@ -122,8 +131,8 @@ test.describe('Real-time Collaboration', () => {
     await joinPage.fill('input[placeholder="Enter room ID to join..."]', roomId);
     await joinPage.click('text=🔗 Join');
 
-    await hostPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
-    await joinPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
+    await hostPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
+    await joinPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
 
     // Add multiple tasks simultaneously
     const hostPromise = (async () => {
@@ -175,8 +184,8 @@ test.describe('Real-time Collaboration', () => {
     await joinPage.fill('input[placeholder="Enter room ID to join..."]', roomId);
     await joinPage.click('text=🔗 Join');
 
-    await hostPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
-    await joinPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
+    await hostPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
+    await joinPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
 
     // Add initial task
     await hostPage.fill('input[placeholder="Add a new task..."]', 'Task before disconnect');
@@ -194,7 +203,7 @@ test.describe('Real-time Collaboration', () => {
     await joinPage.context().setOffline(false);
     
     // Wait for reconnection and sync
-    await joinPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...', { timeout: 15000 });
+    await joinPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...', { timeout: 15000 });
     
     // Verify offline task synced after reconnection
     await expect(joinPage.locator('text=Task while offline')).toBeVisible({ timeout: 10000 });
@@ -227,13 +236,13 @@ test.describe('Real-time Collaboration', () => {
       await joinPage.goto('/');
       await joinPage.fill('input[placeholder="Enter room ID to join..."]', roomId);
       await joinPage.click('text=🔗 Join');
-      await joinPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
+      await joinPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
 
       // Second joiner connects
       await thirdPage.goto('/');
       await thirdPage.fill('input[placeholder="Enter room ID to join..."]', roomId);
       await thirdPage.click('text=🔗 Join');
-      await thirdPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
+      await thirdPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
 
       // Verify all show 3 connected users
       await expect(hostPage.locator('text=Connected users: 3')).toBeVisible({ timeout: 10000 });
@@ -281,8 +290,8 @@ test.describe('Real-time Collaboration', () => {
     await joinPage.fill('input[placeholder="Enter room ID to join..."]', roomId);
     await joinPage.click('text=🔗 Join');
 
-    await hostPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
-    await joinPage.waitForSelector('text=ℹ️ Connected as host! 🎉 Waiting for others...');
+    await hostPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
+    await joinPage.waitForSelector('text=Connected as host! 🎉 Waiting for others...');
 
     // Add initial task
     await hostPage.fill('input[placeholder="Add a new task..."]', 'Toggle test task');

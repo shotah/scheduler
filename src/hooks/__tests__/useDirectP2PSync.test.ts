@@ -49,7 +49,7 @@ describe('useDirectP2PSync', () => {
   it('should connect to a room as host', async () => {
     // Mock empty peers array consistently to simulate being the first/host
     const { discoverPeers } = require('../../signaling');
-    const originalMock = discoverPeers.getMockImplementation();
+    // const originalMock = discoverPeers.getMockImplementation();
     discoverPeers.mockResolvedValue([]); // Temporarily override for this test
 
     const { result } = renderHook(() => useDirectP2PSync());

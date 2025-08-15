@@ -4,10 +4,10 @@
  */
 
 import { createRoom } from '../../signaling';
-import { unstable_dev, UnstableDevWorker } from 'wrangler';
+import { unstable_dev, Unstable_DevWorker } from 'wrangler';
 
 describe('Signaling Integration', () => {
-  let worker: UnstableDevWorker;
+  let worker: Unstable_DevWorker;
   let baseUrl: string;
 
   beforeAll(async () => {
@@ -230,7 +230,7 @@ describe('Signaling Integration', () => {
       // Add small artificial delay to simulate real network
       const originalFetch = global.fetch;
       
-      global.fetch = jest.fn().mockImplementation(async (...args) => {
+      global.fetch = jest.fn().mockImplementation(async (...args: [RequestInfo, RequestInit?]) => {
         await new Promise((resolve) => setTimeout(resolve, Math.random() * 100)); // 0-100ms delay
         return originalFetch(...args);
       });
